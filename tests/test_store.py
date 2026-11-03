@@ -31,7 +31,9 @@ def test_recurrence_and_snooze(tmp_path):
     key=db.tasks()[0]["id"]
     db.toggle(key)
     task=db.tasks()[0]
-    assert task["done"]==0 and task["due_at"]=="2026-11-05 12:00:00"
+    assert task["done"]==1 and task["due_at"]=="2026-11-04 12:00:00"
+    future = next(t for t in db.tasks() if not t["done"])
+    assert future["due_at"]=="2026-11-05 12:00:00"
     db.snooze(key,10)
     assert db.tasks()[0]["notified"]==0
     db.close()

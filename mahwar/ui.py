@@ -3,15 +3,16 @@ from __future__ import annotations
 import sys
 from datetime import datetime, timedelta, date
 from pathlib import Path
-from PySide6.QtCore import Qt, QTimer, QDateTime
+from PySide6.QtCore import Qt, QTimer, QDateTime, QDate, QTime, QSize, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QIcon, QAction, QCloseEvent
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QGridLayout,
     QLabel, QPushButton, QLineEdit, QPlainTextEdit, QComboBox, QCheckBox,
-    QDateTimeEdit, QDialog, QDialogButtonBox, QFormLayout, QFrame, QScrollArea,
+    QDateTimeEdit, QDateEdit, QTimeEdit, QDialog, QDialogButtonBox, QFormLayout, QFrame, QScrollArea,
     QMessageBox, QFileDialog, QSystemTrayIcon, QMenu, QProgressBar, QSpinBox,
 )
 from .db import Store
+from .icons import icon_for
 
 BG = "#F2F2F2"
 NAVY = "#424359"
@@ -21,10 +22,10 @@ MINT = "#B4D9CB"
 BORDER = "#DEE7E3"
 DAY_NAMES = ["الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"]
 ROUTES = [
-    ("dashboard", "⌂  الرئيسية"), ("week", "▦  المخطط الأسبوعي"),
-    ("tasks", "☑  جميع المهام"), ("reminders", "♧  التذكيرات"),
-    ("focus", "◷  التركيز"), ("review", "▤  المراجعة الأسبوعية"),
-    ("settings", "⚙  الإعدادات"),
+    ("dashboard", "الرئيسية"), ("week", "المخطط الأسبوعي"),
+    ("tasks", "جميع المهام"), ("reminders", "التذكيرات"),
+    ("focus", "التركيز"), ("review", "المراجعة الأسبوعية"),
+    ("settings", "الإعدادات"),
 ]
 QSS = """
 QMainWindow, QWidget { background: #F2F2F2; color: #424359; font-family: 'Segoe UI', 'Tahoma', sans-serif; font-size: 14px; }
@@ -39,10 +40,26 @@ QPushButton { border: 1px solid #DEE7E3; border-radius: 9px; background: white; 
 QPushButton:hover { border-color: #3E8C6F; background: #E9F4F0; }
 QPushButton#Primary { background: #3E8C6F; border: 1px solid #3E8C6F; color: white; }
 QPushButton#Primary:hover { background: #618C7C; }
-QPushButton#Nav { text-align: right; border: none; background: transparent; padding: 13px 14px; }
-QPushButton#Nav[active="true"] { background: #B4D9CB; color: #265D49; }
+QPushButton#Nav { min-height: 30px; text-align: right; border: 1px solid transparent; border-radius: 13px; background: transparent; padding: 11px 17px; font-size: 14px; font-weight: 650; }
+QPushButton#Nav:hover { background: #E7F1EC; color: #3E8C6F; }
+QPushButton#Nav[active="true"] { background: #B4D9CB; color: #265D49; font-weight: 800; border-color: #B4D9CB; }
+QFrame#Sidebar { background: #FFFFFF; border-left: 1px solid #DEE7E3; }
+QWidget#NavArea { background: #FFFFFF; }
+QLabel#DoneTitle { color: #618C7C; text-decoration: line-through; }
+QPushButton#DoneAction { background: #E3F2EC; color: #28654E; border-color: #B4D9CB; font-weight: 750; }
+QPushButton#DoneAction:hover { background: #B4D9CB; }
+QScrollBar:vertical { background: #F2F2F2; width: 10px; margin: 3px 2px; border-radius: 5px; }
+QScrollBar::handle:vertical { background: #B4D9CB; min-height: 35px; border-radius: 5px; }
+QScrollBar::handle:vertical:hover, QScrollBar::handle:vertical:pressed { background: #618C7C; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; border: none; }
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
+QScrollBar:horizontal { background: #F2F2F2; height: 9px; border-radius: 4px; }
+QScrollBar::handle:horizontal { background: #B4D9CB; min-width: 36px; border-radius: 4px; }
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; }
 QPushButton#Danger { color: #B84040; }
-QLineEdit, QPlainTextEdit, QDateTimeEdit, QComboBox, QSpinBox { background: white; border: 1px solid #DEE7E3; border-radius: 7px; padding: 7px; color: #424359; }
+QLineEdit, QPlainTextEdit, QDateTimeEdit, QDateEdit, QTimeEdit, QComboBox, QSpinBox { background: white; border: 1px solid #DEE7E3; border-radius: 7px; padding: 7px; color: #424359; min-height: 24px; }
+QDateEdit::drop-down { width: 24px; border: none; }
+QTimeEdit { min-width: 145px; }
 QLineEdit:focus, QPlainTextEdit:focus { border: 1px solid #3E8C6F; }
 QProgressBar { border: none; background: #E4E8E7; border-radius: 6px; height: 12px; text-align: center; }
 QProgressBar::chunk { background: #5BD9AB; border-radius: 6px; }
@@ -87,6 +104,29 @@ def clear_layout(lay):
 def saturday_of(current):
     return current - timedelta(days=(current.weekday() + 2) % 7)
 
+class SmoothScrollArea(QScrollArea):
+    """Animated wheel scrolling with normal scrollbar drag and keyboard support."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._scroll_anim = QPropertyAnimation(self.verticalScrollBar(), b"value", self)
+        self._scroll_anim.setDuration(190)
+        self._scroll_anim.setEasingCurve(QEasingCurve.OutCubic)
+    def wheelEvent(self, event):
+        direction = event.angleDelta().y()
+        if not direction:
+            return super().wheelEvent(event)
+        bar = self.verticalScrollBar()
+        start = bar.value()
+        target = (self._scroll_anim.endValue()
+                  if self._scroll_anim.state() == QPropertyAnimation.Running else start)
+        delta = int(direction / 120 * 92)
+        target = max(bar.minimum(), min(bar.maximum(), target - delta))
+        self._scroll_anim.stop()
+        self._scroll_anim.setStartValue(start)
+        self._scroll_anim.setEndValue(target)
+        self._scroll_anim.start()
+        event.accept()
+
 class TaskDialog(QDialog):
     def __init__(self, parent=None, task=None, day=None):
         super().__init__(parent)
@@ -106,27 +146,35 @@ class TaskDialog(QDialog):
         self.priority = QComboBox()
         for text, value in [("عادية","normal"),("مرتفعة","high"),("منخفضة","low")]:
             self.priority.addItem(text,value)
-        self.due = QDateTimeEdit()
+        self.due = QDateEdit()
         self.due.setCalendarPopup(True)
-        self.due.setDisplayFormat("yyyy-MM-dd HH:mm")
-        self.due.setDateTime(QDateTime.currentDateTime().addSecs(3600))
+        self.due.setDisplayFormat("yyyy-MM-dd")
+        self.due.setDate(QDate.currentDate())
+        self.at_time = QTimeEdit()
+        self.at_time.setDisplayFormat("HH:mm")
+        self.at_time.setTime(QTime.currentTime().addSecs(3600))
+        self.at_time.setToolTip("اضغط على الساعات أو الدقائق واكتب القيمة، أو استخدم الأسهم لتغيير الوقت")
+        self.at_time.setKeyboardTracking(False)
         self.alert = QCheckBox("تفعيل التذكير عند الموعد")
         self.alert.setChecked(bool(task.get("remind_at")))
         self.recurrence = QComboBox()
         for text, value in [("بدون تكرار","none"),("يومي","daily"),("أسبوعي","weekly"),("شهري","monthly")]:
             self.recurrence.addItem(text,value)
         if day:
-            self.due.setDateTime(QDateTime.fromString(day+" 09:00","yyyy-MM-dd HH:mm"))
+            self.due.setDate(QDate.fromString(day,"yyyy-MM-dd"))
+            self.at_time.setTime(QTime(9, 0))
         if task:
             old = QDateTime.fromString(task.get("due_at",""),"yyyy-MM-dd HH:mm:ss")
             if old.isValid():
-                self.due.setDateTime(old)
+                self.due.setDate(old.date())
+                self.at_time.setTime(old.time())
             for control, key in [(self.size,"size"),(self.priority,"priority"),(self.recurrence,"recurrence")]:
                 index = control.findData(task.get(key))
                 if index >= 0: control.setCurrentIndex(index)
         for title, widget in [
             ("اسم المهمة",self.title),("الوصف",self.description),("المشروع",self.project),
-            ("حجم المهمة",self.size),("الأولوية",self.priority),("التاريخ والوقت",self.due),
+            ("حجم المهمة",self.size),("الأولوية",self.priority),
+            ("تاريخ المهمة",self.due),("الوقت (ساعة : دقيقة)",self.at_time),
             ("التذكير",self.alert),("التكرار",self.recurrence)
         ]:
             form.addRow(title,widget)
@@ -140,7 +188,7 @@ class TaskDialog(QDialog):
         else:
             self.accept()
     def payload(self):
-        due = self.due.dateTime().toString("yyyy-MM-dd HH:mm:ss")
+        due = self.due.date().toString("yyyy-MM-dd") + " " + self.at_time.time().toString("HH:mm") + ":00"
         return dict(title=self.title.text().strip(), description=self.description.toPlainText().strip(),
                     project=self.project.text().strip() or "شخصي",
                     size=self.size.currentData(), priority=self.priority.currentData(),
@@ -169,25 +217,49 @@ class MainWindow(QMainWindow):
         root = QHBoxLayout(outer)
         root.setContentsMargins(0,0,0,0)
         root.setSpacing(0)
-        sidebar = QWidget()
-        sidebar.setFixedWidth(237)
-        sidebar.setStyleSheet("background: #F2F2F2; border-left: 1px solid #DEE7E3;")
-        nav = QVBoxLayout(sidebar)
-        nav.setContentsMargins(14,25,14,20)
-        nav.setSpacing(7)
-        nav.addWidget(label("مِحور  ✓","Brand"))
-        nav.addWidget(label("Focus  |  خطط · ركّز · أنجز","Muted"))
-        nav.addSpacing(15)
+        sidebar = QFrame()
+        sidebar.setObjectName("Sidebar")
+        sidebar.setFixedWidth(251)
+        side_layout = QVBoxLayout(sidebar)
+        side_layout.setContentsMargins(13, 22, 13, 16)
+        side_layout.setSpacing(14)
+        brand = QWidget()
+        brand.setObjectName("NavArea")
+        brand_row = QHBoxLayout(brand)
+        brand_row.setContentsMargins(9, 0, 9, 0)
+        brand_row.setSpacing(11)
+        brand_icon = QLabel()
+        brand_icon.setPixmap(self.icon.pixmap(39, 39))
+        brand_row.addWidget(brand_icon)
+        brand_text = QVBoxLayout()
+        brand_text.setSpacing(2)
+        brand_text.addWidget(label("مِحور","Brand"))
+        brand_text.addWidget(label("خطط · ركّز · أنجز","Muted"))
+        brand_row.addLayout(brand_text, 1)
+        side_layout.addWidget(brand)
+        self.nav_scroll = SmoothScrollArea()
+        self.nav_scroll.setObjectName("NavScroll")
+        self.nav_scroll.setWidgetResizable(True)
+        self.nav_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.nav_scroll.setFrameShape(QFrame.NoFrame)
+        nav_content = QWidget()
+        nav_content.setObjectName("NavArea")
+        nav = QVBoxLayout(nav_content)
+        nav.setContentsMargins(4, 12, 4, 14)
+        nav.setSpacing(9)
         self.nav_buttons = {}
         for route, title in ROUTES:
             item = QPushButton(title)
             item.setObjectName("Nav")
+            item.setIcon(icon_for(route, NAVY))
+            item.setIconSize(QSize(21,21))
+            item.setCursor(Qt.PointingHandCursor)
             item.clicked.connect(lambda _checked=False, route=route: self.navigate(route))
             self.nav_buttons[route] = item
             nav.addWidget(item)
         nav.addStretch()
-        nav.addWidget(label("●  بياناتك محفوظة محلياً","Muted"))
-        nav.addWidget(label("Windows 10/11","Muted"))
+        self.nav_scroll.setWidget(nav_content)
+        side_layout.addWidget(self.nav_scroll,1)
         content = QWidget()
         main = QVBoxLayout(content)
         main.setContentsMargins(24,24,24,18)
@@ -196,13 +268,14 @@ class MainWindow(QMainWindow):
         head = QVBoxLayout()
         self.page_heading = label("لوحة القيادة","PageTitle")
         head.addWidget(self.page_heading)
-        self.today_label = label(date.today().strftime("%Y-%m-%d"),"Muted")
+        self._shown_date = date.today()
+        self.today_label = label(self._shown_date.strftime("%Y-%m-%d"),"Muted")
         head.addWidget(self.today_label)
         header.addLayout(head)
         header.addStretch()
         header.addWidget(button("＋  مهمة جديدة", lambda: self.open_task(), primary=True))
         main.addLayout(header)
-        self.scroller = QScrollArea()
+        self.scroller = SmoothScrollArea()
         self.scroller.setWidgetResizable(True)
         self.body = QWidget()
         self.body_layout = QVBoxLayout(self.body)
@@ -229,18 +302,36 @@ class MainWindow(QMainWindow):
         self.focus_timer = QTimer(self)
         self.focus_timer.timeout.connect(self.focus_tick)
         self.focus_timer.start(1000)
+        self.clock_timer = QTimer(self)
+        self.clock_timer.timeout.connect(self.refresh_date)
+        self.clock_timer.start(15000)
         self.navigate("dashboard")
         QTimer.singleShot(700,self.check_reminders)
 
+    def refresh_date(self):
+        """Refresh the date after midnight or resume, without recreating pages each tick."""
+        local_today = date.today()
+        if local_today != self._shown_date:
+            self._shown_date = local_today
+            self.today_label.setText(local_today.strftime("%Y-%m-%d"))
+            self.navigate(self.current)
+
     def navigate(self, route):
+        self.refresh_date_label_only()
         self.current = route
         names = dict(ROUTES)
-        self.page_heading.setText(names[route].split("  ",1)[-1])
+        self.page_heading.setText(names[route])
+
+    def refresh_date_label_only(self):
+        self._shown_date = date.today()
+        self.today_label.setText(self._shown_date.strftime("%Y-%m-%d"))
         for name, item in self.nav_buttons.items():
             item.setProperty("active", "true" if name==route else "false")
             item.style().unpolish(item)
             item.style().polish(item)
+            item.setIcon(icon_for(name, PRIMARY if name == route else NAVY))
         clear_layout(self.body_layout)
+        self.scroller.verticalScrollBar().setValue(0)
         build = getattr(self,"render_"+route)
         build()
 
@@ -263,16 +354,23 @@ class MainWindow(QMainWindow):
         frame, box = card_layout(10)
         row = QHBoxLayout()
         done = QCheckBox()
+        done.setAccessibleName("مكتملة: " + task["title"])
+        done.setToolTip("ضع علامة صح عند إنجاز المهمة، أو أزلها لإعادة فتحها")
         done.setChecked(bool(task["done"]))
         done.stateChanged.connect(lambda _s, task_id=task["id"]:self.toggle_task(task_id))
         row.addWidget(done)
         text_box = QVBoxLayout()
-        headline = label(task["title"],"Section" if task["priority"]=="high" else None)
+        headline = label(task["title"], "DoneTitle" if task["done"] else ("Section" if task["priority"]=="high" else None))
         text_box.addWidget(headline)
         sizes = {"large":"كبيرة", "medium":"متوسطة", "small":"صغيرة"}
         more = "{}  ·  {}  ·  {}".format(task["project"], task["due_at"][:16], sizes.get(task["size"],"صغيرة"))
         text_box.addWidget(label(more,"Muted"))
         row.addLayout(text_box,1)
+        action = button("↶ إعادة فتح" if task["done"] else "✓ تم الإنجاز",
+                        lambda _=False, task_id=task["id"]:self.toggle_task(task_id))
+        action.setObjectName("DoneAction")
+        action.setToolTip("إعادة المهمة إلى القائمة" if task["done"] else "تحديد المهمة كمكتملة")
+        row.addWidget(action)
         if reminders:
             row.addWidget(button("تأجيل 10 د", lambda _=False, key=task["id"]:self.snooze(key)))
         row.addWidget(button("تعديل",lambda _=False,t=task:self.open_task(t)))
@@ -284,6 +382,11 @@ class MainWindow(QMainWindow):
         self.body_layout.addWidget(label(text,"Section"))
 
     def render_dashboard(self):
+        banner, banner_box = card_layout(22)
+        banner_title = label("✨ صباح الإنجاز يبدأ بخطة واضحة", "Section")
+        banner_box.addWidget(banner_title)
+        banner_box.addWidget(label("اختر أهم مهمة اليوم، ونظّم أسبوعك دون ازدحام.", "Muted"))
+        self.body_layout.addWidget(banner)
         stats = self.store.stats()
         row = QHBoxLayout()
         for title, value, hint in [
@@ -349,9 +452,19 @@ class MainWindow(QMainWindow):
             stack.addWidget(label(day.strftime("%d/%m"),"Muted"))
             day_tasks=self.store.tasks(start=day.isoformat()+" 00:00:00",end=day.isoformat()+" 23:59:59")
             for task in day_tasks[:4]:
-                widget=button(("✓ " if task["done"] else "")+task["title"][:24],
-                              lambda _=False,t=task:self.open_task(t))
-                stack.addWidget(widget)
+                task_line = QHBoxLayout()
+                done = QCheckBox()
+                done.setChecked(bool(task["done"]))
+                done.setToolTip("إنجاز المهمة")
+                done.stateChanged.connect(
+                    lambda _state, key=task["id"]: self.toggle_task(key))
+                task_line.addWidget(done)
+                widget = button(task["title"][:24],
+                                lambda _=False,t=task:self.open_task(t))
+                if task["done"]:
+                    widget.setStyleSheet("text-decoration: line-through; color: #618C7C;")
+                task_line.addWidget(widget, 1)
+                stack.addLayout(task_line)
             stack.addStretch()
             stack.addWidget(button("＋ إضافة",lambda _=False,d=day.isoformat():self.open_task(day=d)))
             week_row.addWidget(frame,1)

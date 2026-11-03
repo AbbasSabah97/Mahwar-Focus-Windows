@@ -66,7 +66,7 @@ class Store:
             sql += " AND due_at >= ?"
             args.append(start)
         if end:
-            sql += " AND due_at < ?"
+            sql += " AND due_at <= ?"
             args.append(end)
         sql += " ORDER BY done, due_at, CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, id"
         return [dict(row) for row in self.connection.execute(sql, args).fetchall()]
@@ -88,17 +88,29 @@ class Store:
         self.connection.commit()
 
     def toggle(self, task_id):
+        """Keep the completed occurrence visible; schedule a new row for recurrence."""
         row = self._one("SELECT * FROM tasks WHERE id=?", (task_id,))
         if row is None:
             return
-        if not row["done"] and row["recurrence"] in ("daily", "weekly", "monthly"):
-            due = next_occurrence(row["due_at"], row["recurrence"])
-            reminder = next_occurrence(row["remind_at"], row["recurrence"]) if row["remind_at"] else ""
-            self.connection.execute("UPDATE tasks SET due_at=?,remind_at=?,notified=0 WHERE id=?",
-                                    (due, reminder, task_id))
-        else:
-            self.connection.execute("UPDATE tasks SET done=1-done WHERE id=?", (task_id,))
-        self.connection.commit()
+        with self.connection:
+            if row["done"]:
+                self.connection.execute(
+                    "UPDATE tasks SET done=0, notified=0 WHERE id=?", (task_id,))
+            else:
+                self.connection.execute(
+                    "UPDATE tasks SET done=1, notified=1 WHERE id=?", (task_id,))
+                if row["recurrence"] in ("daily", "weekly", "monthly"):
+                    fields = ("title", "description", "project", "size", "priority",
+                              "due_at", "remind_at", "recurrence", "created_at")
+                    due = next_occurrence(row["due_at"], row["recurrence"])
+                    remind = next_occurrence(row["remind_at"], row["recurrence"]) if row["remind_at"] else ""
+                    values = [row[k] for k in fields]
+                    values[5] = due
+                    values[6] = remind
+                    values[8] = datetime.now().isoformat(timespec="seconds")
+                    self.connection.execute(
+                        "INSERT INTO tasks (" + ",".join(fields) + ") VALUES (" +
+                        ",".join("?" for _ in fields) + ")", values)
 
     def delete(self, task_id):
         self.connection.execute("DELETE FROM tasks WHERE id=?", (task_id,))
