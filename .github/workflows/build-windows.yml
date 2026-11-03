@@ -1,0 +1,68 @@
+name: Build Mahwar Focus for Windows
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-build.txt
+
+      - name: Install Windows build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-build.txt
+
+      - name: Generate application icon
+        shell: pwsh
+        run: python bootstrap_source.py
+
+      - name: Run database and Qt GUI tests
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest tests -q
+
+      - name: Build Windows EXE with PyInstaller
+        shell: pwsh
+        run: |
+          python -m PyInstaller --clean --noconfirm --onefile --windowed `
+            --name MahwarFocus `
+            --icon "assets/mahwar.ico" `
+            --add-data "assets/mahwar.ico;assets" `
+            run.py
+
+      - name: Validate and package portable executable
+        shell: pwsh
+        run: |
+          if (!(Test-Path "dist/MahwarFocus.exe")) { throw "EXE not produced" }
+          Copy-Item "README.md" "dist/README.md"
+          Compress-Archive -Path "dist/MahwarFocus.exe","dist/README.md" `
+            -DestinationPath "dist/MahwarFocus-Windows.zip" -Force
+          Get-FileHash "dist/MahwarFocus.exe" -Algorithm SHA256 | Format-List
+
+      - name: Upload Windows binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: MahwarFocus-Windows-Portable
+          path: |
+            dist/MahwarFocus.exe
+            dist/MahwarFocus-Windows.zip
+          retention-days: 30
+          if-no-files-found: error
