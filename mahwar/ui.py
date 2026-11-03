@@ -269,7 +269,8 @@ class MainWindow(QMainWindow):
         text_box = QVBoxLayout()
         headline = label(task["title"],"Section" if task["priority"]=="high" else None)
         text_box.addWidget(headline)
-        more = f'{task["project"]}  ·  {task["due_at"][:16]}  ·  {{"large":"كبيرة","medium":"متوسطة","small":"صغيرة"}.get(task["size"],"صغيرة")}'
+        sizes = {"large":"كبيرة", "medium":"متوسطة", "small":"صغيرة"}
+        more = "{}  ·  {}  ·  {}".format(task["project"], task["due_at"][:16], sizes.get(task["size"],"صغيرة"))
         text_box.addWidget(label(more,"Muted"))
         row.addLayout(text_box,1)
         if reminders:
