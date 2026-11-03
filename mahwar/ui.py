@@ -316,15 +316,15 @@ class MainWindow(QMainWindow):
             self.today_label.setText(local_today.strftime("%Y-%m-%d"))
             self.navigate(self.current)
 
+    def refresh_date_label_only(self):
+        self._shown_date = date.today()
+        self.today_label.setText(self._shown_date.strftime("%Y-%m-%d"))
+
     def navigate(self, route):
         self.refresh_date_label_only()
         self.current = route
         names = dict(ROUTES)
         self.page_heading.setText(names[route])
-
-    def refresh_date_label_only(self):
-        self._shown_date = date.today()
-        self.today_label.setText(self._shown_date.strftime("%Y-%m-%d"))
         for name, item in self.nav_buttons.items():
             item.setProperty("active", "true" if name==route else "false")
             item.style().unpolish(item)
