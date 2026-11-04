@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QGridLayout,
     QLabel, QPushButton, QLineEdit, QPlainTextEdit, QComboBox, QCheckBox,
     QDateTimeEdit, QDateEdit, QTimeEdit, QAbstractSpinBox, QDialog, QDialogButtonBox, QFormLayout, QFrame, QScrollArea,
-    QMessageBox, QFileDialog, QSystemTrayIcon, QMenu, QProgressBar, QSpinBox,
+    QMessageBox, QFileDialog, QSystemTrayIcon, QMenu, QProgressBar, QSpinBox, QSizePolicy,
 )
 from .db import Store
 from .icons import icon_for
@@ -21,6 +21,19 @@ SECONDARY = "#618C7C"
 MINT = "#B4D9CB"
 BORDER = "#DEE7E3"
 DAY_NAMES = ["الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"]
+MONTH_NAMES = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"]
+
+def format_local_clock(now=None):
+    """Arabic weekday/date and live 12-hour device-local time."""
+    now = now or datetime.now()
+    return (f"{DAY_NAMES[now.weekday()]}، {now.day} {MONTH_NAMES[now.month - 1]} {now.year}"
+            f"  |  {now.strftime('%I:%M:%S %p')}")
+
+def greeting_for_time(now=None):
+    """Daypart switches at noon, independently of dashboard navigation."""
+    now = now or datetime.now()
+    return "صباح الإنجاز يبدأ بخطة واضحة" if now.hour < 12 else "مساء الإنجاز يبدأ بخطة واضحة"
+
 ROUTES = [
     ("dashboard", "الرئيسية"), ("week", "المخطط الأسبوعي"),
     ("tasks", "جميع المهام"), ("reminders", "التذكيرات"),
@@ -36,6 +49,19 @@ QLabel#Section { font-size: 18px; font-weight: 700; }
 QLabel#Muted { color: #618C7C; }
 QFrame#Card { border: 1px solid #DEE7E3; background: white; border-radius: 15px; }
 QFrame#Card QLabel, QFrame#Card QCheckBox { background: transparent; }
+QFrame#DayCard { border: 1px solid #DEE7E3; border-radius: 16px; background: #FFFFFF; }
+QFrame#TodayCard { border: 2px solid #3E8C6F; border-radius: 16px; background: #EDF6F2; }
+QFrame#WeekTask { border: 1px solid #E6EEE9; border-radius: 10px; background: #FAFCFB; }
+QFrame#TodayCard QLabel, QFrame#DayCard QLabel, QFrame#WeekTask QLabel, QFrame#WeekTask QCheckBox { background: transparent; }
+QLabel#DayTitle { font-size: 19px; font-weight: 800; color: #424359; }
+QLabel#TodayDayTitle { font-size: 19px; font-weight: 800; color: #3E8C6F; }
+QLabel#WeekTaskTitle { font-size: 14px; font-weight: 650; color: #424359; }
+QLabel#WeekTaskDone { font-size: 14px; color: #618C7C; text-decoration: line-through; }
+QLabel#WeekCount { background: #E2F0EA; color: #28654E; padding: 5px 10px; border-radius: 9px; }
+QPushButton#SmallAction { border: none; background: transparent; color: #3E8C6F; padding: 4px 8px; font-size: 12px; text-align: right; }
+QPushButton#SmallAction:hover { background: #DCECE5; }
+QPushButton#AddDay { border: 1px dashed #9BC9B3; background: #F0F8F4; color: #2B6D54; padding: 8px; font-weight: 700; }
+QPushButton#AddDay:hover { background: #DBEFE5; }
 QPushButton { border: 1px solid #DEE7E3; border-radius: 9px; background: white; color: #424359; padding: 9px 13px; font-weight: 600; }
 QPushButton:hover { border-color: #3E8C6F; background: #E9F4F0; }
 QPushButton#Primary { background: #3E8C6F; border: 1px solid #3E8C6F; color: white; }
@@ -384,7 +410,7 @@ class MainWindow(QMainWindow):
         self.page_heading = label("لوحة القيادة","PageTitle")
         head.addWidget(self.page_heading)
         self._shown_date = date.today()
-        self.today_label = label(self._shown_date.strftime("%Y-%m-%d"),"Muted")
+        self.today_label = label(format_local_clock(),"Muted")
         head.addWidget(self.today_label)
         header.addLayout(head)
         header.addStretch()
@@ -419,21 +445,27 @@ class MainWindow(QMainWindow):
         self.focus_timer.start(1000)
         self.clock_timer = QTimer(self)
         self.clock_timer.timeout.connect(self.refresh_date)
-        self.clock_timer.start(15000)
+        self.clock_timer.start(1000)
         self.navigate("dashboard")
         QTimer.singleShot(700,self.check_reminders)
 
     def refresh_date(self):
-        """Refresh the date after midnight or resume, without recreating pages each tick."""
-        local_today = date.today()
-        if local_today != self._shown_date:
-            self._shown_date = local_today
-            self.today_label.setText(local_today.strftime("%Y-%m-%d"))
+        """Update live clock and evening greeting; rebuild only when day changes."""
+        now = datetime.now()
+        self.today_label.setText(format_local_clock(now))
+        if self.current == "dashboard" and getattr(self, "greeting_label", None) is not None:
+            self.greeting_label.setText("✨ " + greeting_for_time(now))
+        if now.date() != self._shown_date:
+            previous_day = self._shown_date
+            self._shown_date = now.date()
+            if saturday_of(self.week_anchor) == saturday_of(previous_day):
+                self.week_anchor = now.date()
             self.navigate(self.current)
 
     def refresh_date_label_only(self):
-        self._shown_date = date.today()
-        self.today_label.setText(self._shown_date.strftime("%Y-%m-%d"))
+        now = datetime.now()
+        self._shown_date = now.date()
+        self.today_label.setText(format_local_clock(now))
 
     def navigate(self, route):
         self.refresh_date_label_only()
@@ -493,8 +525,8 @@ class MainWindow(QMainWindow):
 
     def render_dashboard(self):
         banner, banner_box = card_layout(22)
-        banner_title = label("✨ صباح الإنجاز يبدأ بخطة واضحة", "Section")
-        banner_box.addWidget(banner_title)
+        self.greeting_label = label("✨ " + greeting_for_time(), "Section")
+        banner_box.addWidget(self.greeting_label)
         banner_box.addWidget(label("اختر أهم مهمة اليوم، ونظّم أسبوعك دون ازدحام.", "Muted"))
         self.body_layout.addWidget(banner)
         stats = self.store.stats()
@@ -542,57 +574,105 @@ class MainWindow(QMainWindow):
                 self.body_layout.addWidget(self.task_row(task))
 
     def render_week(self):
+        """Readable two-column weekly board; all task titles remain visible."""
         week = saturday_of(self.week_anchor)
+        days = [week + timedelta(days=index) for index in range(7)]
+        all_tasks = self.store.tasks(start=week.isoformat() + " 00:00:00",
+                                     end=days[-1].isoformat() + " 23:59:59")
+        by_day = {day.isoformat(): [] for day in days}
+        for task in all_tasks:
+            by_day[task["due_at"][:10]].append(task)
+
+        header_card, header_box = card_layout(18)
         navigation = QHBoxLayout()
-        navigation.addWidget(label(f'الأسبوع: {week.isoformat()} — {(week+timedelta(days=6)).isoformat()}',"Section"))
-        navigation.addStretch()
-        navigation.addWidget(button("الأسبوع السابق",lambda:self.change_week(-7)))
-        navigation.addWidget(button("هذا الأسبوع",lambda:self.change_week(0)))
-        navigation.addWidget(button("الأسبوع التالي",lambda:self.change_week(7)))
-        self.body_layout.addLayout(navigation)
-        week_row=QHBoxLayout()
-        for index in range(7):
-            day=week+timedelta(days=index)
-            frame, stack=card_layout(10)
-            frame.setMinimumWidth(125)
-            frame.setMaximumWidth(240)
-            if day==date.today():
-                frame.setStyleSheet("QFrame#Card {border:2px solid #3E8C6F;background:#EFF8F4;border-radius:15px;}")
-            stack.addWidget(label(DAY_NAMES[day.weekday()],"Section"))
-            stack.addWidget(label(day.strftime("%d/%m"),"Muted"))
-            day_tasks=self.store.tasks(start=day.isoformat()+" 00:00:00",end=day.isoformat()+" 23:59:59")
-            for task in day_tasks[:4]:
-                task_line = QHBoxLayout()
-                done = CompletionBox()
-                done.setChecked(bool(task["done"]))
-                done.setToolTip("إنجاز المهمة")
-                done.stateChanged.connect(
-                    lambda _state, key=task["id"]: self.toggle_task(key))
-                task_line.addWidget(done)
-                widget = button(task["title"][:24],
-                                lambda _=False,t=task:self.open_task(t))
-                if task["done"]:
-                    widget.setStyleSheet("text-decoration: line-through; color: #618C7C;")
-                task_line.addWidget(widget, 1)
-                stack.addLayout(task_line)
-            stack.addStretch()
-            stack.addWidget(button("＋ إضافة",lambda _=False,d=day.isoformat():self.open_task(day=d)))
-            week_row.addWidget(frame,1)
-        self.body_layout.addLayout(week_row)
-        self.add_section("الأهداف الرئيسية لهذا الأسبوع")
+        week_title = label(f"الأسبوع: {days[0].strftime('%d/%m')} — {days[-1].strftime('%d/%m/%Y')}", "Section")
+        navigation.addWidget(week_title, 1)
+        navigation.addWidget(button("السابق", lambda: self.change_week(-7)))
+        navigation.addWidget(button("هذا الأسبوع", lambda: self.change_week(0)))
+        navigation.addWidget(button("التالي", lambda: self.change_week(7)))
+        header_box.addLayout(navigation)
+        done = sum(bool(task["done"]) for task in all_tasks)
+        header_box.addWidget(label(f"المهام: {len(all_tasks)}    •    المكتملة: {done}    •    المتبقية: {len(all_tasks) - done}", "Muted"))
+        self.body_layout.addWidget(header_card)
+
+        # Two generous columns instead of seven tiny unreadable day columns.
+        board = QGridLayout()
+        board.setContentsMargins(0, 0, 0, 0)
+        board.setHorizontalSpacing(16)
+        board.setVerticalSpacing(16)
+        board.setColumnStretch(0, 1)
+        board.setColumnStretch(1, 1)
+        self.week_day_cards = {}
+        for index, day in enumerate(days):
+            key = day.isoformat()
+            items = by_day[key]
+            frame = QFrame()
+            frame.setObjectName("TodayCard" if day == date.today() else "DayCard")
+            frame.setMinimumWidth(300)
+            frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+            day_box = QVBoxLayout(frame)
+            day_box.setContentsMargins(18, 16, 18, 17)
+            day_box.setSpacing(10)
+            day_header = QHBoxLayout()
+            title = label(DAY_NAMES[day.weekday()], "TodayDayTitle" if day == date.today() else "DayTitle")
+            day_header.addWidget(title, 1)
+            day_header.addWidget(label(f"{day.day:02}/{day.month:02}", "Muted"))
+            if day == date.today():
+                day_header.addWidget(label("اليوم", "WeekCount"))
+            day_box.addLayout(day_header)
+            day_box.addWidget(label(f"{len(items)} مهمة · {sum(bool(t['done']) for t in items)} مكتملة", "Muted"))
+
+            if not items:
+                nothing = label("لا توجد مهام مجدولة لهذا اليوم.", "Muted")
+                nothing.setMinimumHeight(36)
+                day_box.addWidget(nothing)
+            else:
+                for task in items:
+                    item_frame = QFrame()
+                    item_frame.setObjectName("WeekTask")
+                    task_layout = QHBoxLayout(item_frame)
+                    task_layout.setContentsMargins(10, 9, 10, 9)
+                    task_layout.setSpacing(8)
+                    done_check = CompletionBox()
+                    done_check.setAccessibleName("إنجاز " + task["title"])
+                    done_check.setChecked(bool(task["done"]))
+                    done_check.stateChanged.connect(
+                        lambda _state, key=task["id"]: self.toggle_task(key))
+                    task_layout.addWidget(done_check, 0, Qt.AlignTop)
+                    info = QVBoxLayout()
+                    info.setSpacing(3)
+                    task_title = label(task["title"], "WeekTaskDone" if task["done"] else "WeekTaskTitle")
+                    task_title.setToolTip(task["title"])
+                    info.addWidget(task_title)
+                    due = datetime.fromisoformat(task["due_at"])
+                    info.addWidget(label(f"{due.strftime('%I:%M %p')}  ·  {task['project']}", "Muted"))
+                    task_layout.addLayout(info, 1)
+                    edit = button("تعديل", lambda _=False, t=task: self.open_task(t))
+                    edit.setObjectName("SmallAction")
+                    task_layout.addWidget(edit, 0, Qt.AlignTop)
+                    day_box.addWidget(item_frame)
+
+            add = button("＋ إضافة مهمة", lambda _=False, d=key: self.open_task(day=d))
+            add.setObjectName("AddDay")
+            day_box.addWidget(add)
+            board.addWidget(frame, index // 2, index % 2, Qt.AlignTop)
+            self.week_day_cards[key] = frame
+        self.body_layout.addLayout(board)
+
+        goals_card, goals_box = card_layout(18)
+        goals_box.addWidget(label("الأهداف الرئيسية لهذا الأسبوع", "Section"))
         for goal in self.store.goals(week.isoformat()):
-            r=QHBoxLayout()
-            check=QCheckBox(goal["title"])
+            check = QCheckBox(goal["title"])
             check.setChecked(bool(goal["done"]))
-            check.stateChanged.connect(lambda _,gid=goal["id"]:self.goal_toggle(gid))
-            r.addWidget(check)
-            self.body_layout.addLayout(r)
-        entry=QLineEdit()
+            check.stateChanged.connect(lambda _, gid=goal["id"]: self.goal_toggle(gid))
+            goals_box.addWidget(check)
+        goal_row = QHBoxLayout()
+        entry = QLineEdit()
         entry.setPlaceholderText("اكتب هدفاً لهذا الأسبوع")
-        line=QHBoxLayout()
-        line.addWidget(entry,1)
-        line.addWidget(button("إضافة هدف",lambda:self.add_goal(week.isoformat(),entry.text())))
-        self.body_layout.addLayout(line)
+        goal_row.addWidget(entry, 1)
+        goal_row.addWidget(button("إضافة هدف", lambda: self.add_goal(week.isoformat(), entry.text())))
+        goals_box.addLayout(goal_row)
+        self.body_layout.addWidget(goals_card)
 
     def change_week(self, amount):
         self.week_anchor=date.today() if amount==0 else self.week_anchor+timedelta(days=amount)
@@ -771,7 +851,10 @@ class MainWindow(QMainWindow):
         self.raise_()
 
     def quit_app(self):
-        self._exit=True
+        self._exit = True
+        if self.tray:
+            self.tray.hide()
+        self.close()
         QApplication.quit()
 
     def closeEvent(self,event:QCloseEvent):

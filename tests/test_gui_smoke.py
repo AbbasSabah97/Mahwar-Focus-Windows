@@ -1,10 +1,10 @@
 """Qt GUI smoke test on Windows CI."""
 import os
 os.environ.setdefault("QT_QPA_PLATFORM","offscreen")
-from datetime import date
+from datetime import date, datetime
 from PySide6.QtCore import QDate, QTime
-from PySide6.QtWidgets import QApplication, QLabel, QPushButton
-from mahwar.ui import MainWindow, TaskDialog, CompletionBox, ModernCombo, format_due_12h
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QFrame
+from mahwar.ui import MainWindow, TaskDialog, CompletionBox, ModernCombo, format_due_12h, format_local_clock, greeting_for_time
 from mahwar.db import Store
 
 def test_all_pages_and_form(tmp_path):
@@ -44,8 +44,18 @@ def test_all_pages_and_form(tmp_path):
     checkbox.setChecked(True)
     assert next(t for t in window.store.tasks() if t["id"] == task_id)["done"] == 1
     assert not any(b.objectName() == "DoneAction" for b in window.findChildren(QPushButton))
-    assert window.today_label.text() == date.today().isoformat()
+    assert str(date.today().year) in window.today_label.text()
+    assert ":" in window.today_label.text()
+    assert "AM" in window.today_label.text() or "PM" in window.today_label.text()
+    assert greeting_for_time(datetime(2026, 11, 4, 7)) == "صباح الإنجاز يبدأ بخطة واضحة"
+    assert greeting_for_time(datetime(2026, 11, 4, 17)) == "مساء الإنجاز يبدأ بخطة واضحة"
+    assert format_local_clock(datetime(2026, 11, 4, 17, 28, 6)).endswith("05:28:06 PM")
     assert not any("بياناتك محفوظة" in x.text() for x in window.findChildren(QLabel))
+    window.week_anchor = date.today()
+    window.navigate("week")
+    assert len(window.week_day_cards) == 7
+    assert all(card.minimumWidth() >= 300 for card in window.week_day_cards.values())
+    assert not any(card.maximumWidth() == 240 for card in window.week_day_cards.values())
     dialog.close()
     window.alarm_timer.stop()
     window.focus_timer.stop()
