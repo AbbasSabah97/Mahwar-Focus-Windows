@@ -23,11 +23,22 @@ BORDER = "#DEE7E3"
 DAY_NAMES = ["الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"]
 MONTH_NAMES = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"]
 
-def format_local_clock(now=None):
-    """Arabic weekday/date and live 12-hour device-local time."""
+def format_local_date(now=None):
+    """Arabic date, kept in a dedicated right-to-left widget."""
     now = now or datetime.now()
-    return (f"{DAY_NAMES[now.weekday()]}، {now.day} {MONTH_NAMES[now.month - 1]} {now.year}"
-            f"  |  {now.strftime('%I:%M:%S %p')}")
+    return f"{DAY_NAMES[now.weekday()]}، {now.day} {MONTH_NAMES[now.month - 1]} {now.year}"
+
+
+def format_local_time(now=None):
+    """12-hour local time, kept in a dedicated left-to-right widget."""
+    now = now or datetime.now()
+    return now.strftime("%I:%M:%S %p")
+
+
+def format_local_clock(now=None):
+    """Plain-text helper for reports; UI uses separate direction-isolated widgets."""
+    now = now or datetime.now()
+    return format_local_date(now) + " | " + format_local_time(now)
 
 def greeting_for_time(now=None):
     """Daypart switches at noon, independently of dashboard navigation."""
@@ -47,6 +58,9 @@ QLabel#Brand { color: #3E8C6F; font-size: 25px; font-weight: 800; }
 QLabel#StatNumber { color: #3E8C6F; font-size: 28px; font-weight: 700; }
 QLabel#Section { font-size: 18px; font-weight: 700; }
 QLabel#Muted { color: #618C7C; }
+QLabel#HeaderDate { color: #618C7C; font-size: 12px; background: transparent; }
+QLabel#HeaderTime { color: #424359; font-size: 12px; font-weight: 700; background: transparent; }
+QLabel#HeaderSeparator { color: #A6C3B8; font-size: 13px; background: transparent; }
 QFrame#Card { border: 1px solid #DEE7E3; background: white; border-radius: 15px; }
 QFrame#Card QLabel, QFrame#Card QCheckBox { background: transparent; }
 QFrame#DayCard { border: 1px solid #DEE7E3; border-radius: 16px; background: #FFFFFF; }
@@ -407,11 +421,39 @@ class MainWindow(QMainWindow):
         main.setSpacing(15)
         header = QHBoxLayout()
         head = QVBoxLayout()
-        self.page_heading = label("لوحة القيادة","PageTitle")
+        head.setSpacing(5)
+        self.page_heading = label("لوحة القيادة", "PageTitle")
+        self.page_heading.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         head.addWidget(self.page_heading)
         self._shown_date = date.today()
-        self.today_label = label(format_local_clock(),"Muted")
-        head.addWidget(self.today_label)
+        # Do not put Arabic RTL and AM/PM LTR in one wrapping QLabel.
+        # Separate children keep their individual text directions and layout widths.
+        meta = QHBoxLayout()
+        meta.setContentsMargins(0, 0, 0, 0)
+        meta.setSpacing(9)
+        self.today_label = QLabel(format_local_date())
+        self.today_label.setObjectName("HeaderDate")
+        self.today_label.setTextFormat(Qt.PlainText)
+        self.today_label.setWordWrap(False)
+        self.today_label.setLayoutDirection(Qt.RightToLeft)
+        self.today_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.today_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+        meta.addWidget(self.today_label)
+        separator = QLabel("•")
+        separator.setObjectName("HeaderSeparator")
+        separator.setWordWrap(False)
+        separator.setAlignment(Qt.AlignCenter)
+        meta.addWidget(separator)
+        self.clock_label = QLabel(format_local_time())
+        self.clock_label.setObjectName("HeaderTime")
+        self.clock_label.setTextFormat(Qt.PlainText)
+        self.clock_label.setWordWrap(False)
+        self.clock_label.setLayoutDirection(Qt.LeftToRight)
+        self.clock_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.clock_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+        meta.addWidget(self.clock_label)
+        meta.addStretch(1)
+        head.addLayout(meta)
         header.addLayout(head)
         header.addStretch()
         header.addWidget(button("＋  مهمة جديدة", lambda: self.open_task(), primary=True))
@@ -452,7 +494,8 @@ class MainWindow(QMainWindow):
     def refresh_date(self):
         """Update live clock and evening greeting; rebuild only when day changes."""
         now = datetime.now()
-        self.today_label.setText(format_local_clock(now))
+        self.today_label.setText(format_local_date(now))
+        self.clock_label.setText(format_local_time(now))
         if self.current == "dashboard" and getattr(self, "greeting_label", None) is not None:
             self.greeting_label.setText("✨ " + greeting_for_time(now))
         if now.date() != self._shown_date:
@@ -465,7 +508,8 @@ class MainWindow(QMainWindow):
     def refresh_date_label_only(self):
         now = datetime.now()
         self._shown_date = now.date()
-        self.today_label.setText(format_local_clock(now))
+        self.today_label.setText(format_local_date(now))
+        self.clock_label.setText(format_local_time(now))
 
     def navigate(self, route):
         self.refresh_date_label_only()
